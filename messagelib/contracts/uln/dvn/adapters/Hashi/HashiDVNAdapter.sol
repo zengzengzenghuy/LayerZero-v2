@@ -3,6 +3,7 @@
 pragma solidity ^0.8.22;
 
 import {DVNAdapterBase} from "../DVNAdapterBase.sol";
+import {HashiRegistry, AdapterPair} from "./HashiRegistry.sol";
 import "https://github.com/gnosis/hashi/blob/main/packages/evm/contracts/Yaho.sol";
 import "https://github.com/gnosis/hashi/blob/main/packages/evm/contracts/Hashi.sol";
 import {IOracleAdapter} from "https://github.com/gnosis/hashi/blob/main/packages/evm/contracts/interfaces/IOracleAdapter.sol";
@@ -10,6 +11,7 @@ import {IOracleAdapter} from "https://github.com/gnosis/hashi/blob/main/packages
 abstract contract HashiDVNAdapter is DVNAdapterBase {
     Yaho yaho;
     Hashi hashi;
+    HashiRegistry hashiRegistry;
     struct DstConfigParam {
         uint32 dstEid;
         uint16 multiplierBps;
@@ -42,10 +44,12 @@ abstract contract HashiDVNAdapter is DVNAdapterBase {
         address _receiveLib,
         address[] memory _admins,
         address _yaho,
-        address _hashi
+        address _hashi,
+        address _hashiRegistry
     ) DVNAdapterBase(_sendLib, _receiveLib, _admins) {
         yaho = Yaho(_yaho);
         hashi = Hashi(_hashi);
+        hashiRegistry = HashiRegistry(_hashiRegistry);
     }
 
     // Called by SendLib from source chain
@@ -56,19 +60,15 @@ abstract contract HashiDVNAdapter is DVNAdapterBase {
         DstConfig memory config = dstConfig[_param.dstEid];
 
         // in packetHeader, there is no message field
-        // pHashi's message = DVN's payload
+        // Hashi's message = DVN's payload
         bytes memory message = _encodePayload(
             _param.packetHeader,
             _param.payloadHash
         );
 
-        // decode receiver field from AssignJobParam _param
-        address receiver;
-        assembly {
-            let ptr := mload(0x40)
-            calldatacopy(ptr, 36, 81)
-            receiver := mload(add(ptr, 49))
-        }
+        (uint32 _srcEid, uint32 _dstEid, bytes _receiver) = _decodePacketHeader(
+            _param.packetHeader
+        );
 
         // construct Hashi Message type
         Message memory HashiMessage = Message({
@@ -81,15 +81,14 @@ abstract contract HashiDVNAdapter is DVNAdapterBase {
         messageArray[0] = HashiMessage;
 
         // Get an array of Hashi adapters
-        address[] memory destAdapters = chainIdToDestAdapters[
-            eidToChainId[_param.dstEid]
-        ];
+        AdapterPair[] memory sourceAdaptersPair = hashiRegistry
+            .getSourceAdaptersPair(_srcEid, _param.dstEid);
 
         // pass the message to adapters
         yaho.dispatchMessagesToAdapters(
             messageArray,
-            sourceAdapters,
-            destAdapters
+            sourceAdaptersPair.sourceAdapter,
+            sourceAdaptersPair.destAdapter
         );
 
         // TODO: get Fee from Hashi adapters
@@ -97,17 +96,6 @@ abstract contract HashiDVNAdapter is DVNAdapterBase {
         _assertBalanceAndWithdrawFee(fee);
 
         return fee;
-    }
-
-    function setSourceAdapters(address[] memory _adapters) external onlyAdmin {
-        sourceAdapters = _adapters;
-    }
-
-    function setDestAdapters(
-        uint256 chainId,
-        address[] memory _adapters
-    ) external onlyAdmin {
-        chainIdToDestAdapters[chainId] = _adapters;
     }
 
     // TODO: define Fee lib logic
@@ -141,8 +129,18 @@ abstract contract HashiDVNAdapter is DVNAdapterBase {
         // check hash from different adapters
         // It's not possible to know the source chain based on messageId and messageHash from adapters
         // Here we assume source chain is Ethereum
-        uint256 sourceChainId = 1;
-        address[] memory destAdapters = chainIdToDestAdapters[block.chainid];
+        (bytes memory packetHeader, bytes32 payloadHash) = _decodePayload(
+            _payload
+        );
+
+        (uint32 _srcEid, uint32 _dstEid, bytes _receiver) = _decodePacketHeader(
+            _param.packetHeader
+        );
+
+        address[] memory destAdapters = hashiRegistry.getDestAdapters(
+            _srcEid,
+            _dstEid
+        );
         bytes32 reportedHash = 0x0;
         IOracleAdapter[] memory oracleAdapters = new IOracleAdapter[](
             destAdapters.length
@@ -150,6 +148,8 @@ abstract contract HashiDVNAdapter is DVNAdapterBase {
         for (uint56 i = 0; i < destAdapters.length; i++) {
             oracleAdapters[i] = IOracleAdapter(destAdapters[i]);
         }
+
+        uint256 sourceChainId = uint256(srcEid);
         try
             hashi.getHash(sourceChainId, uint256(messageId), oracleAdapters)
         returns (bytes32 hash) {
@@ -160,6 +160,24 @@ abstract contract HashiDVNAdapter is DVNAdapterBase {
 
         if (reportedHash != 0x0) {
             _verify(_payload);
+        }
+    }
+
+    function _decodePacket(
+        bytes memory packetHeader
+    ) internal returns (uint32 srcEid, uint32 dstEid, bytes32 receiver) {
+        // bytes packetHeader = abi.encodePacked(
+        //     PACKET_VERSION, //uint8
+        //     _packet.nonce, //uint64
+        //     _packet.srcEid, //uint32
+        //     _packet.sender.toBytes32(),  //bytes32
+        //     _packet.dstEid, //uint32
+        //     _packet.receiver //bytes32
+        // );
+        assembly {
+            srcEid := mload(add(packetHeader, 72)) // 8 + 64
+            dstEid := mload(add(packetHeader, 360)) // 8 + 64 + 32 +256
+            receiver := mload(add(packetHeader, 392)) // 8 + 64 + 32 +256 +
         }
     }
 
