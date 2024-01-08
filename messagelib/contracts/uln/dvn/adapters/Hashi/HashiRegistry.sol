@@ -10,8 +10,21 @@ struct AdapterPair {
 }
 
 contract HashiRegistry is Ownable {
+    event NewFeeSet(uint32 indexed destEid, uint256 indexed fee);
+    event NewSourceAdaptersPairSet(
+        uint32 indexed sourceEid,
+        uint32 indexed destEid,
+        address indexed sourceAdapters,
+        address destAdapters
+    );
+    event NewDestAdaptersPairSet(
+        uint32 indexed sourceEid,
+        uint32 indexed destEid,
+        address indexed destAdapters
+    );
     mapping(uint32 sourceEid => mapping(uint32 destEid => AdapterPair[] adapters)) sourceAdaptersPair;
     mapping(uint32 destEid => mapping(uint32 sourceEid => address[] adapters)) destAdapters;
+    mapping(uint32 destEid => uint256 fee) hashiFee;
 
     constructor() Ownable(msg.sender) {}
 
@@ -22,6 +35,7 @@ contract HashiRegistry is Ownable {
         return sourceAdaptersPair[sourceEid][destEid];
     }
 
+    /// @notice set source adapters pair, called by source Hashi DVN owner
     function setSourceAdaptersPair(
         uint32 sourceEid,
         uint32 destEid,
@@ -33,6 +47,12 @@ contract HashiRegistry is Ownable {
             sourceAdapters[sourceEid][destEid].push(
                 AdapterPair(_sourceAdapters[i], _destAdapters[i])
             );
+            emit NewSourceAdaptersPairSet(
+                sourceEid,
+                destEid,
+                _sourceAdapters[i],
+                _destAdapters[i]
+            );
         }
     }
 
@@ -43,6 +63,7 @@ contract HashiRegistry is Ownable {
         return destAdapters[sourceEid][destEid];
     }
 
+    /// @notice set dest adapters pair, called by destination Hashi DVN owner
     function setDestAdapters(
         uint32 sourceEid,
         uint32 destEid,
@@ -51,6 +72,19 @@ contract HashiRegistry is Ownable {
         uint256 len = _destAdapters.length;
         for (uint256 i = 0; i < len; i++) {
             destAdapters[sourceEid][destEid].push(_destAdapters[i]);
+            emit NewDestAdaptersPairSet(sourceEid, destEid, _destAdapters[i]);
         }
+    }
+
+    function getDestFee(uint32 destEid) external view returns (uint256 fee) {
+        return hashiFee[destEid];
+    }
+
+    /// @notice set fee for destination adapters, called by source Hashi DVN owner
+    function setDestFee(
+        uint32 destEid,
+        uint256 _fee
+    ) external onlyOwner returns (uint256 fee) {
+        hashiFee[destAdapters] = _fee;
     }
 }

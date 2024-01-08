@@ -8,7 +8,7 @@ import "https://github.com/gnosis/hashi/blob/main/packages/evm/contracts/Yaho.so
 import "https://github.com/gnosis/hashi/blob/main/packages/evm/contracts/Hashi.sol";
 import {IOracleAdapter} from "https://github.com/gnosis/hashi/blob/main/packages/evm/contracts/interfaces/IOracleAdapter.sol";
 
-abstract contract HashiDVNAdapter is DVNAdapterBase {
+contract HashiDVNAdapter is DVNAdapterBase {
     Yaho yaho;
     Hashi hashi;
     HashiRegistry hashiRegistry;
@@ -52,14 +52,42 @@ abstract contract HashiDVNAdapter is DVNAdapterBase {
         hashiRegistry = HashiRegistry(_hashiRegistry);
     }
 
-    // Called by SendLib from source chain
+    /// @notice sets configuration (`dstEid`, `multiplierBps`, `gasLimit` and `peer`) for destination chains
+    /// @param _params array of chain configurations
+    function setDstConfig(
+        DstConfigParam[] calldata _params
+    ) external onlyAdmin {
+        for (uint256 i = 0; i < _params.length; i++) {
+            DstConfigParam calldata param = _params[i];
+
+            dstConfig[param.dstEid] = DstConfig({
+                chainSelector: param.dstEid,
+                multiplierBps: param.multiplierBps,
+                gasLimit: param.gasLimit,
+                peer: param.peer
+            });
+        }
+
+        emit DstConfigSet(_params);
+    }
+
+    /// @notice sets mapping for LayerZero's EID to ChainID
+    /// @param eid eid of LayerZero
+    /// @param chainID chainID of EIP155
+    function setEidToChainID(uint32 eid, uint256 chainID) external onlyOwner {
+        eidToChainId[eid] = chainID;
+    }
+
+    /// @notice function called by SendLib from source chain when a new job is assigned by user
+    /// @param _param param for AssignJob
+    /// @param _options options includes Security and Executor
     function assignJob(
         AssignJobParam calldata _param,
         bytes calldata _options
     ) external payable override onlySendLib returns (uint256 fee) {
         DstConfig memory config = dstConfig[_param.dstEid];
 
-        // in packetHeader, there is no message field
+        // In _param.packetHeader, there is no message field. In order to construct the message for Hashi, we need to encode payload with packet header
         // Hashi's message = DVN's payload
         bytes memory message = _encodePayload(
             _param.packetHeader,
@@ -70,7 +98,7 @@ abstract contract HashiDVNAdapter is DVNAdapterBase {
             _param.packetHeader
         );
 
-        // construct Hashi Message type
+        // Construct Hashi Message type
         Message memory HashiMessage = Message({
             to: address(receiver),
             toChainId: eidToChainId[_param.dstEid],
@@ -80,11 +108,11 @@ abstract contract HashiDVNAdapter is DVNAdapterBase {
         Message[] memory messageArray = new Message[](1);
         messageArray[0] = HashiMessage;
 
-        // Get an array of Hashi adapters
+        // Get an array of available Hashi adapters for source -> dest chain
         AdapterPair[] memory sourceAdaptersPair = hashiRegistry
             .getSourceAdaptersPair(_srcEid, _param.dstEid);
 
-        // pass the message to adapters
+        // Pass the message to Hashi adapters by calling Yaho contract
         yaho.dispatchMessagesToAdapters(
             messageArray,
             sourceAdaptersPair.sourceAdapter,
@@ -92,14 +120,15 @@ abstract contract HashiDVNAdapter is DVNAdapterBase {
         );
 
         // TODO: get Fee from Hashi adapters
-        fee = 10000;
-        _assertBalanceAndWithdrawFee(fee);
+        // Currently it is hardcoded in HashiRegistry contract
+        fee = hashiRegistry.getDestFee(_param.dstEid);
 
         return fee;
     }
 
     // TODO: define Fee lib logic
-    // combining fee request from different adapters?
+    // Currently it is hardcoded in HashiRegistry contract
+    /// @notice Function called by LayerZero contract
     function getFee(
         uint32 _dstEid,
         uint64 _confirmations,
@@ -107,7 +136,7 @@ abstract contract HashiDVNAdapter is DVNAdapterBase {
         bytes calldata _options
     ) external view override returns (uint256 fee) {
         DstConfig storage config = dstConfig[_dstEid];
-
+        fee = hashiRegistry.getDestFee(_dstEid);
         if (address(feeLib) != address(0)) {
             fee = feeLib.getFee(
                 _dstEid,
@@ -119,9 +148,11 @@ abstract contract HashiDVNAdapter is DVNAdapterBase {
         }
     }
 
-    // called by Hashi DVN on destination chain
-    // 1. Check if message hash from Hashi adapters are the same
-    // 2. If same, call receiveLib to verify the payload
+    /// @notice Function called by Hashi DVN on destination chain
+    ///         1. Check if message hash from Hashi adapters are the same
+    ///         2. If same, call receiveLib to verify the payload
+    /// @param messageId messageId from Hashi `MessageRelayed` event from source chain
+    /// @param _payload payload from Endpoint
     function verifyMessageHash(
         bytes32 messageId,
         bytes memory _payload
@@ -159,37 +190,27 @@ abstract contract HashiDVNAdapter is DVNAdapterBase {
         }
 
         if (reportedHash != 0x0) {
-            _verify(_payload);
+            _verify(payloadHash);
         }
     }
 
+    /// @notice decode data from packetHeader
+    // bytes packetHeader = abi.encodePacked(
+    //     PACKET_VERSION, //uint8
+    //     _packet.nonce, //uint64
+    //     _packet.srcEid, //uint32
+    //     _packet.sender.toBytes32(),  //bytes32
+    //     _packet.dstEid, //uint32
+    //     _packet.receiver //bytes32
+    // );
+    /// @param packetHeader packet header from endpoint
     function _decodePacket(
         bytes memory packetHeader
     ) internal returns (uint32 srcEid, uint32 dstEid, bytes32 receiver) {
-        // bytes packetHeader = abi.encodePacked(
-        //     PACKET_VERSION, //uint8
-        //     _packet.nonce, //uint64
-        //     _packet.srcEid, //uint32
-        //     _packet.sender.toBytes32(),  //bytes32
-        //     _packet.dstEid, //uint32
-        //     _packet.receiver //bytes32
-        // );
         assembly {
             srcEid := mload(add(packetHeader, 72)) // 8 + 64
             dstEid := mload(add(packetHeader, 360)) // 8 + 64 + 32 +256
             receiver := mload(add(packetHeader, 392)) // 8 + 64 + 32 +256 +
         }
-    }
-
-    // TODO: since there is no way to get sourceChainID from messageId, we need to make sure this function is called by DVN peer from source chain
-    function _assertPeer(
-        uint256 _sourceChainId,
-        bytes memory _sourceDVNAddress
-    ) private view {
-        uint32 sourceEid = chainIdToEid[_sourceChainId];
-        bytes memory sourcePeer = dstConfig[sourceEid].peer;
-
-        if (keccak256(_sourceDVNAddress) != keccak256(sourcePeer))
-            revert Unauthorized();
     }
 }
