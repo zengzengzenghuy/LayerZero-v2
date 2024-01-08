@@ -37,7 +37,6 @@ contract HashiDVNAdapter is DVNAdapterBase {
 
     mapping(uint256 chainId => address[] destAdapter)
         public chainIdToDestAdapters;
-    address[] sourceAdapters;
 
     constructor(
         address _sendLib,
@@ -61,7 +60,6 @@ contract HashiDVNAdapter is DVNAdapterBase {
             DstConfigParam calldata param = _params[i];
 
             dstConfig[param.dstEid] = DstConfig({
-                chainSelector: param.dstEid,
                 multiplierBps: param.multiplierBps,
                 gasLimit: param.gasLimit,
                 peer: param.peer
@@ -94,13 +92,16 @@ contract HashiDVNAdapter is DVNAdapterBase {
             _param.payloadHash
         );
 
-        (uint32 _srcEid, uint32 _dstEid, bytes _receiver) = _decodePacketHeader(
-            _param.packetHeader
-        );
+        (
+            uint32 _srcEid,
+            uint32 _dstEid,
+            bytes32 _receiver
+        ) = _decodePacketHeader(_param.packetHeader);
 
         // Construct Hashi Message type
+
         Message memory HashiMessage = Message({
-            to: address(receiver),
+            to: address(uint160(uint(_receiver))),
             toChainId: eidToChainId[_param.dstEid],
             data: message
         });
@@ -113,10 +114,18 @@ contract HashiDVNAdapter is DVNAdapterBase {
             .getSourceAdaptersPair(_srcEid, _param.dstEid);
 
         // Pass the message to Hashi adapters by calling Yaho contract
+        address[] memory sourceAdapters;
+        address[] memory destAdapters;
+
+        for (uint256 i = 0; i < sourceAdaptersPair.length; i++) {
+            sourceAdapters[i] = (sourceAdaptersPair[i].sourceAdapter);
+            destAdapters[i] = (sourceAdaptersPair[i].destAdapter);
+        }
+
         yaho.dispatchMessagesToAdapters(
             messageArray,
-            sourceAdaptersPair.sourceAdapter,
-            sourceAdaptersPair.destAdapter
+            sourceAdapters,
+            destAdapters
         );
 
         // TODO: get Fee from Hashi adapters
@@ -164,9 +173,11 @@ contract HashiDVNAdapter is DVNAdapterBase {
             _payload
         );
 
-        (uint32 _srcEid, uint32 _dstEid, bytes _receiver) = _decodePacketHeader(
-            _param.packetHeader
-        );
+        (
+            uint32 _srcEid,
+            uint32 _dstEid,
+            bytes32 _receiver
+        ) = _decodePacketHeader(packetHeader);
 
         address[] memory destAdapters = hashiRegistry.getDestAdapters(
             _srcEid,
@@ -180,7 +191,7 @@ contract HashiDVNAdapter is DVNAdapterBase {
             oracleAdapters[i] = IOracleAdapter(destAdapters[i]);
         }
 
-        uint256 sourceChainId = uint256(srcEid);
+        uint256 sourceChainId = uint256(_srcEid);
         try
             hashi.getHash(sourceChainId, uint256(messageId), oracleAdapters)
         returns (bytes32 hash) {
@@ -190,7 +201,7 @@ contract HashiDVNAdapter is DVNAdapterBase {
         }
 
         if (reportedHash != 0x0) {
-            _verify(payloadHash);
+            _verify(_payload);
         }
     }
 
@@ -204,7 +215,7 @@ contract HashiDVNAdapter is DVNAdapterBase {
     //     _packet.receiver //bytes32
     // );
     /// @param packetHeader packet header from endpoint
-    function _decodePacket(
+    function _decodePacketHeader(
         bytes memory packetHeader
     ) internal returns (uint32 srcEid, uint32 dstEid, bytes32 receiver) {
         assembly {

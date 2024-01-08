@@ -44,7 +44,7 @@ contract HashiRegistry is Ownable {
     ) external onlyOwner {
         uint256 len = _sourceAdapters.length;
         for (uint256 i = 0; i < len; i++) {
-            sourceAdapters[sourceEid][destEid].push(
+            sourceAdaptersPair[sourceEid][destEid].push(
                 AdapterPair(_sourceAdapters[i], _destAdapters[i])
             );
             emit NewSourceAdaptersPairSet(
@@ -81,10 +81,7 @@ contract HashiRegistry is Ownable {
     }
 
     /// @notice set fee for destination adapters, called by source Hashi DVN owner
-    function setDestFee(
-        uint32 destEid,
-        uint256 _fee
-    ) external onlyOwner returns (uint256 fee) {
-        hashiFee[destAdapters] = _fee;
+    function setDestFee(uint32 destEid, uint256 _fee) external onlyOwner {
+        hashiFee[destEid] = _fee;
     }
 }
