@@ -30,4 +30,5 @@ remappings = [
     '@layerzerolabs/lz-evm-v1-0.7/=node_modules/@layerzerolabs/lz-evm-v1-0.7/',
     '@axelar-network/axelar-gmp-sdk-solidity/=node_modules/@axelar-network/axelar-gmp-sdk-solidity/',
     '@chainlink/contracts-ccip/=node_modules/@chainlink/contracts-ccip/',
+    '@hashi/packages/evm/contracts/=../lib/hashi/packages/evm/contracts/',
 ]

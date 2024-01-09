@@ -26,7 +26,7 @@ contract HashiRegistry is Ownable {
     mapping(uint32 destEid => mapping(uint32 sourceEid => address[] adapters)) destAdapters;
     mapping(uint32 destEid => uint256 fee) hashiFee;
 
-    constructor() Ownable(msg.sender) {}
+    constructor() {}
 
     function getSourceAdaptersPair(
         uint32 sourceEid,

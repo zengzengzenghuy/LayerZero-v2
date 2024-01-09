@@ -4,9 +4,10 @@ pragma solidity ^0.8.22;
 
 import {DVNAdapterBase} from "../DVNAdapterBase.sol";
 import {HashiRegistry, AdapterPair} from "./HashiRegistry.sol";
-import "https://github.com/gnosis/hashi/blob/main/packages/evm/contracts/Yaho.sol";
-import "https://github.com/gnosis/hashi/blob/main/packages/evm/contracts/Hashi.sol";
-import {IOracleAdapter} from "https://github.com/gnosis/hashi/blob/main/packages/evm/contracts/interfaces/IOracleAdapter.sol";
+import {Yaho} from "@hashi/packages/evm/contracts/Yaho.sol";
+import {Hashi} from "@hashi/packages/evm/contracts/Hashi.sol";
+import {Message} from "@hashi/packages/evm/contracts/interfaces/IMessageDispatcher.sol";
+import {IOracleAdapter} from "@hashi/packages/evm/contracts/interfaces/IOracleAdapter.sol";
 
 contract HashiDVNAdapter is DVNAdapterBase {
     Yaho yaho;
