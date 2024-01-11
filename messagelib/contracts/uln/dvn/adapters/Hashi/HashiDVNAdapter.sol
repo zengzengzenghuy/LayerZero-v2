@@ -95,7 +95,7 @@ contract HashiDVNAdapter is DVNAdapterBase {
 
         (
             uint32 _srcEid,
-            uint32 _dstEid,
+            uint32 _dstEid, // dstEid
             bytes32 _receiver
         ) = _decodePacketHeader(_param.packetHeader);
 
@@ -112,11 +112,15 @@ contract HashiDVNAdapter is DVNAdapterBase {
 
         // Get an array of available Hashi adapters for source -> dest chain
         AdapterPair[] memory sourceAdaptersPair = hashiRegistry
-            .getSourceAdaptersPair(_srcEid, _param.dstEid);
+            .getSourceAdaptersPair(_srcEid, _dstEid);
 
         // Pass the message to Hashi adapters by calling Yaho contract
-        address[] memory sourceAdapters;
-        address[] memory destAdapters;
+        address[] memory sourceAdapters = new address[](
+            sourceAdaptersPair.length
+        );
+        address[] memory destAdapters = new address[](
+            sourceAdaptersPair.length
+        );
 
         for (uint256 i = 0; i < sourceAdaptersPair.length; i++) {
             sourceAdapters[i] = (sourceAdaptersPair[i].sourceAdapter);
@@ -131,9 +135,17 @@ contract HashiDVNAdapter is DVNAdapterBase {
 
         // TODO: get Fee from Hashi adapters
         // Currently it is hardcoded in HashiRegistry contract
-        fee = hashiRegistry.getDestFee(_param.dstEid);
+        fee = hashiRegistry.getDestFee(_dstEid);
 
         return fee;
+    }
+
+    /// For testing
+    function encodePayload(
+        bytes memory _packetHeader,
+        bytes32 _payloadHash
+    ) external returns (bytes memory) {
+        return _encodePayload(_packetHeader, _payloadHash);
     }
 
     // TODO: define Fee lib logic
@@ -208,21 +220,21 @@ contract HashiDVNAdapter is DVNAdapterBase {
 
     /// @notice decode data from packetHeader
     // bytes packetHeader = abi.encodePacked(
-    //     PACKET_VERSION, //uint8
-    //     _packet.nonce, //uint64
-    //     _packet.srcEid, //uint32
-    //     _packet.sender.toBytes32(),  //bytes32
-    //     _packet.dstEid, //uint32
-    //     _packet.receiver //bytes32
+    //     PACKET_VERSION, //uint8 1-2
+    //     _packet.nonce, //uint64 3-18
+    //     _packet.srcEid, //uint32 18-25
+    //     _packet.sender.toBytes32(),  //bytes32 26-89
+    //     _packet.dstEid, //uint32 90-97
+    //     _packet.receiver //bytes32 98-161
     // );
     /// @param packetHeader packet header from endpoint
     function _decodePacketHeader(
         bytes memory packetHeader
-    ) internal returns (uint32 srcEid, uint32 dstEid, bytes32 receiver) {
+    ) internal pure returns (uint32 srcEid, uint32 dstEid, bytes32 receiver) {
         assembly {
-            srcEid := mload(add(packetHeader, 72)) // 8 + 64
-            dstEid := mload(add(packetHeader, 360)) // 8 + 64 + 32 +256
-            receiver := mload(add(packetHeader, 392)) // 8 + 64 + 32 +256 +
+            srcEid := mload(add(packetHeader, 13)) // 8 + 64 + 32
+            dstEid := mload(add(packetHeader, 49)) // 8 + 64 + 32 +256 + 32
+            receiver := mload(add(packetHeader, 81)) // 8 + 64 + 32 +256 + 32 + 256
         }
     }
 }
