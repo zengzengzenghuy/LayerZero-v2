@@ -60,7 +60,7 @@ contract HashiRegistry is Ownable {
         uint32 sourceEid,
         uint32 destEid
     ) external view returns (address[] memory) {
-        return destAdapters[sourceEid][destEid];
+        return destAdapters[destEid][sourceEid];
     }
 
     /// @notice set dest adapters pair, called by destination Hashi DVN owner
@@ -71,7 +71,7 @@ contract HashiRegistry is Ownable {
     ) external onlyOwner {
         uint256 len = _destAdapters.length;
         for (uint256 i = 0; i < len; i++) {
-            destAdapters[sourceEid][destEid].push(_destAdapters[i]);
+            destAdapters[destEid][sourceEid].push(_destAdapters[i]);
             emit NewDestAdaptersPairSet(sourceEid, destEid, _destAdapters[i]);
         }
     }
@@ -83,5 +83,6 @@ contract HashiRegistry is Ownable {
     /// @notice set fee for destination adapters, called by source Hashi DVN owner
     function setDestFee(uint32 destEid, uint256 _fee) external onlyOwner {
         hashiFee[destEid] = _fee;
+        emit NewFeeSet(destEid, _fee);
     }
 }
