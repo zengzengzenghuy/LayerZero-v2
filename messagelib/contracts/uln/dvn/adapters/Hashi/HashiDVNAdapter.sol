@@ -3,16 +3,13 @@
 pragma solidity ^0.8.22;
 
 import {DVNAdapterBase} from "../DVNAdapterBase.sol";
-import {HashiRegistry, AdapterPair} from "./HashiRegistry.sol";
+import {HashiRegistry} from "./HashiRegistry.sol";
 import {Yaho} from "@hashi/packages/evm/contracts/Yaho.sol";
 import {Hashi} from "@hashi/packages/evm/contracts/Hashi.sol";
 import {Message} from "@hashi/packages/evm/contracts/interfaces/IMessageDispatcher.sol";
 import {IOracleAdapter} from "@hashi/packages/evm/contracts/interfaces/IOracleAdapter.sol";
 
 contract HashiDVNAdapter is DVNAdapterBase {
-    Yaho yaho;
-    Hashi hashi;
-    HashiRegistry hashiRegistry;
     struct DstConfigParam {
         uint32 dstEid;
         uint16 multiplierBps;
@@ -26,18 +23,19 @@ contract HashiDVNAdapter is DVNAdapterBase {
         bytes peer;
     }
 
-    address private constant NATIVE_GAS_TOKEN_ADDRESS = address(0);
+    mapping(uint32 dstEid => DstConfig config) public dstConfig;
+    mapping(uint32 dstEid => uint256 chainId) public eidToChainId;
+
+    Yaho yaho;
+    Hashi hashi;
+    HashiRegistry hashiRegistry;
 
     event DstConfigSet(DstConfigParam[] params);
+    event HashFromAdaptersMatched(
+        uint256 indexed messageId,
+        bytes32 indexed hash
+    );
     event LogError(string error);
-
-    mapping(uint32 dstEid => DstConfig config) public dstConfig;
-
-    mapping(uint32 dstEid => uint256 chainId) public eidToChainId;
-    mapping(uint256 chainId => uint32 eid) public chainIdToEid;
-
-    mapping(uint256 chainId => address[] destAdapter)
-        public chainIdToDestAdapters;
 
     constructor(
         address _sendLib,
@@ -87,7 +85,7 @@ contract HashiDVNAdapter is DVNAdapterBase {
         DstConfig memory config = dstConfig[_param.dstEid];
 
         // In _param.packetHeader, there is no message field. In order to construct the message for Hashi, we need to encode payload with packet header
-        // Hashi's message = DVN's payload
+        // Hashi's message (bytes) = DVN's payload (bytes)
         bytes memory message = _encodePayload(
             _param.packetHeader,
             _param.payloadHash
@@ -95,15 +93,16 @@ contract HashiDVNAdapter is DVNAdapterBase {
 
         (
             uint32 _srcEid,
-            uint32 _dstEid, // dstEid
+            uint32 _dstEid,
             bytes32 _receiver
         ) = _decodePacketHeader(_param.packetHeader);
 
-        // Construct Hashi Message type
+        require(_param.dstEid == _dstEid, "Dst Eid MisMatch!");
 
+        // Construct Hashi Message type
         Message memory HashiMessage = Message({
             to: address(uint160(uint(_receiver))),
-            toChainId: eidToChainId[_param.dstEid],
+            toChainId: eidToChainId[_dstEid],
             data: message
         });
 
@@ -111,7 +110,7 @@ contract HashiDVNAdapter is DVNAdapterBase {
         messageArray[0] = HashiMessage;
 
         // Get an array of available Hashi adapters for source -> dest chain
-        AdapterPair[] memory sourceAdaptersPair = hashiRegistry
+        HashiRegistry.AdapterPair[] memory sourceAdaptersPair = hashiRegistry
             .getSourceAdaptersPair(_srcEid, _dstEid);
 
         // Pass the message to Hashi adapters by calling Yaho contract
@@ -133,29 +132,28 @@ contract HashiDVNAdapter is DVNAdapterBase {
             destAdapters
         );
 
-        // TODO: get Fee from Hashi adapters
-        // Currently it is hardcoded in HashiRegistry contract
         fee = hashiRegistry.getDestFee(_dstEid);
 
         return fee;
     }
 
-    /// For testing
+    /// @notice encode payload from packet header and payload hash
+    /// @param _packetHeader packet header
+    /// @param _payloadHash payload hash
     function encodePayload(
         bytes memory _packetHeader,
         bytes32 _payloadHash
-    ) external returns (bytes memory) {
+    ) external pure returns (bytes memory) {
         return _encodePayload(_packetHeader, _payloadHash);
     }
 
-    // TODO: define Fee lib logic
-    // Currently it is hardcoded in HashiRegistry contract
-    /// @notice Function called by LayerZero contract
+    /// @notice get Fee from Hashi Registry contract and fee Lib
+    /// @dev Function called by LayerZero contract
     function getFee(
         uint32 _dstEid,
-        uint64 _confirmations,
+        uint64 /*confirmations*/,
         address _sender,
-        bytes calldata _options
+        bytes calldata /*options*/
     ) external view override returns (uint256 fee) {
         DstConfig storage config = dstConfig[_dstEid];
         fee = hashiRegistry.getDestFee(_dstEid);
@@ -171,17 +169,15 @@ contract HashiDVNAdapter is DVNAdapterBase {
     }
 
     /// @notice Function called by Hashi DVN on destination chain
-    ///         1. Check if message hash from Hashi adapters are the same
-    ///         2. If same, call receiveLib to verify the payload
+    ///         1. Check if message hash from Hashi adapters are the same w.r.t. the same messageId
+    ///         2. If same, call receiveLib to verify the payload w.r.t the messageId
+    ///         messageId of the message from Hashi should be the same as payload's packet from LZ
     /// @param messageId messageId from Hashi `MessageRelayed` event from source chain
-    /// @param _payload payload from Endpoint
+    /// @param _payload payload of the packet
     function verifyMessageHash(
         bytes32 messageId,
         bytes memory _payload
-    ) external {
-        // check hash from different adapters
-        // It's not possible to know the source chain based on messageId and messageHash from adapters
-        // Here we assume source chain is Ethereum
+    ) external onlyOwner {
         (bytes memory packetHeader, bytes32 payloadHash) = _decodePayload(
             _payload
         );
@@ -196,6 +192,7 @@ contract HashiDVNAdapter is DVNAdapterBase {
             _srcEid,
             _dstEid
         );
+
         bytes32 reportedHash = 0x0;
         IOracleAdapter[] memory oracleAdapters = new IOracleAdapter[](
             destAdapters.length
@@ -204,11 +201,12 @@ contract HashiDVNAdapter is DVNAdapterBase {
             oracleAdapters[i] = IOracleAdapter(destAdapters[i]);
         }
 
-        uint256 sourceChainId = uint256(_srcEid);
+        uint256 sourceChainId = eidToChainId[_srcEid];
         try
             hashi.getHash(sourceChainId, uint256(messageId), oracleAdapters)
         returns (bytes32 hash) {
             reportedHash = hash;
+            emit HashFromAdaptersMatched(uint256(messageId), hash);
         } catch Error(string memory error) {
             emit LogError(error);
         }

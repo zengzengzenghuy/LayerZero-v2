@@ -34,10 +34,6 @@ contract HashiRegistryTest is Test {
         owner = hashiRegistry.owner();
     }
 
-    function test1() public {
-        assertEq(owner, hashiRegistry.owner());
-    }
-
     function test_setDestFee() public {
         vm.expectEmit(true, true, false, false, address(hashiRegistry));
         emit NewFeeSet(dstEid, 10);
@@ -77,10 +73,8 @@ contract HashiRegistryTest is Test {
             destAdapters_
         );
 
-        AdapterPair[] memory adaptersPair = hashiRegistry.getSourceAdaptersPair(
-            srcEid,
-            dstEid
-        );
+        HashiRegistry.AdapterPair[] memory adaptersPair = hashiRegistry
+            .getSourceAdaptersPair(srcEid, dstEid);
 
         assertEq(adaptersPair[0].sourceAdapter, sourceAdpaters_[0]);
         assertEq(adaptersPair[1].sourceAdapter, sourceAdpaters_[1]);
