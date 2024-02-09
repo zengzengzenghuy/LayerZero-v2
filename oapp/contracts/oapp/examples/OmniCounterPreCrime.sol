@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 
-pragma solidity ^0.8.22;
+pragma solidity ^0.8.20;
 
 import { PreCrime, PreCrimePeer } from "../../precrime/PreCrime.sol";
 import { InboundPacket } from "../../precrime/libs/Packet.sol";
@@ -13,7 +13,7 @@ contract OmniCounterPreCrime is PreCrime {
         uint256 outboundCount;
     }
 
-    constructor(address _endpoint, address _counter, address _owner) PreCrime(_endpoint, _counter, _owner) {}
+    constructor(address _endpoint, address _counter) PreCrime(_endpoint, _counter) {}
 
     function buildSimulationResult() external view override returns (bytes memory) {
         address payable payableSimulator = payable(simulator);

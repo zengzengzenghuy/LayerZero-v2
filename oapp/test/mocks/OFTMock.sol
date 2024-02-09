@@ -9,8 +9,8 @@ contract OFTMock is OFT {
         string memory _name,
         string memory _symbol,
         address _lzEndpoint,
-        address _owner
-    ) OFT(_name, _symbol, _lzEndpoint, _owner) {}
+        address _delegate
+    ) OFT(_name, _symbol, _lzEndpoint, _delegate) {}
 
     function mint(address _to, uint256 _amount) public {
         _mint(_to, _amount);
@@ -51,10 +51,8 @@ contract OFTMock is OFT {
 
     function buildMsgAndOptions(
         SendParam calldata _sendParam,
-        bytes calldata _extraOptions,
-        bytes calldata _composeMsg,
         uint256 _amountToCreditLD
     ) public view returns (bytes memory message, bytes memory options) {
-        return _buildMsgAndOptions(_sendParam, _extraOptions, _composeMsg, _amountToCreditLD);
+        return _buildMsgAndOptions(_sendParam, _amountToCreditLD);
     }
 }

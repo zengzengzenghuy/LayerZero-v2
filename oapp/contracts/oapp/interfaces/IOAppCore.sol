@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 
-pragma solidity ^0.8.22;
+pragma solidity ^0.8.20;
 
 import { ILayerZeroEndpointV2 } from "@layerzerolabs/lz-evm-protocol-v2/contracts/interfaces/ILayerZeroEndpointV2.sol";
 
@@ -12,6 +12,7 @@ interface IOAppCore {
     error OnlyPeer(uint32 eid, bytes32 sender);
     error NoPeer(uint32 eid);
     error InvalidEndpointCall();
+    error InvalidDelegate();
 
     // Event emitted when a peer (OApp) is set for a corresponding endpoint
     event PeerSet(uint32 eid, bytes32 peer);

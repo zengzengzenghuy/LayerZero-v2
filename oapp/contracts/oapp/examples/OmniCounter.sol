@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 
-pragma solidity ^0.8.22;
+pragma solidity ^0.8.20;
 
 import { ILayerZeroEndpointV2, MessagingFee, MessagingReceipt, Origin } from "@layerzerolabs/lz-evm-protocol-v2/contracts/interfaces/ILayerZeroEndpointV2.sol";
 import { ILayerZeroComposer } from "@layerzerolabs/lz-evm-protocol-v2/contracts/interfaces/ILayerZeroComposer.sol";
@@ -57,7 +57,7 @@ contract OmniCounter is ILayerZeroComposer, OApp, OAppPreCrimeSimulator {
     mapping(uint32 srcEid => uint256 count) public inboundCount;
     mapping(uint32 dstEid => uint256 count) public outboundCount;
 
-    constructor(address _endpoint, address _owner) OApp(_endpoint, _owner) {
+    constructor(address _endpoint, address _delegate) OApp(_endpoint, _delegate) {
         admin = msg.sender;
         eid = ILayerZeroEndpointV2(_endpoint).eid();
     }

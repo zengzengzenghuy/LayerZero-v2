@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 
-pragma solidity ^0.8.22;
+pragma solidity ^0.8.20;
 
 import { SafeCast } from "@openzeppelin/contracts/utils/math/SafeCast.sol";
 
@@ -13,7 +13,7 @@ abstract contract PreCrimeE1 is PreCrime {
 
     uint32 internal immutable localEid;
 
-    constructor(uint32 _localEid, address _endpoint, address _simulator) PreCrime(_endpoint, _simulator, msg.sender) {
+    constructor(uint32 _localEid, address _endpoint, address _simulator) PreCrime(_endpoint, _simulator) {
         localEid = _localEid;
     }
 

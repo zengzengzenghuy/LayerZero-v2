@@ -6,22 +6,23 @@ import { Test } from "forge-std/Test.sol";
 import { BytesLib } from "solidity-bytes-utils/contracts/BytesLib.sol";
 
 import { ILayerZeroReceiver } from "@layerzerolabs/lz-evm-protocol-v2/contracts/interfaces/ILayerZeroReceiver.sol";
-import { ILayerZeroEndpointV2, ExecutionState, Origin } from "@layerzerolabs/lz-evm-protocol-v2/contracts/interfaces/ILayerZeroEndpointV2.sol";
+import { ILayerZeroEndpointV2, Origin } from "@layerzerolabs/lz-evm-protocol-v2/contracts/interfaces/ILayerZeroEndpointV2.sol";
 import { Packet } from "@layerzerolabs/lz-evm-protocol-v2/contracts/interfaces/ISendLib.sol";
 import { PacketV1Codec } from "@layerzerolabs/lz-evm-protocol-v2/contracts/messagelib/libs/PacketV1Codec.sol";
+import { ExecutionState } from "@layerzerolabs/lz-evm-protocol-v2/contracts/EndpointV2View.sol";
 
 import { ReceiveUln302 } from "../contracts/uln/uln302/ReceiveUln302.sol";
-import { VerificationState } from "../contracts/uln/ReceiveUlnBase.sol";
 import { LzExecutor, LzReceiveParam, NativeDropParam } from "../contracts/uln/LzExecutor.sol";
+import { VerificationState, ReceiveUln302View } from "../contracts/uln/uln302/ReceiveUln302View.sol";
 
 import { Setup } from "./util/Setup.sol";
 import { PacketUtil } from "./util/Packet.sol";
 import { Constant } from "./util/Constant.sol";
-import "forge-std/console.sol";
 
 contract LzExecutorTest is Test, ILayerZeroReceiver {
     Setup.FixtureV2 internal fixtureV2;
     ReceiveUln302 internal receiveUln302;
+    ReceiveUln302View internal receiveUln302View;
     ILayerZeroEndpointV2 internal endpointV2;
     LzExecutor internal lzExecutor;
     uint32 internal EID;
@@ -38,7 +39,14 @@ contract LzExecutorTest is Test, ILayerZeroReceiver {
         fixtureV2 = Setup.loadFixtureV2(Constant.EID_ETHEREUM);
         endpointV2 = ILayerZeroEndpointV2(fixtureV2.endpointV2);
         receiveUln302 = fixtureV2.receiveUln302;
-        lzExecutor = new LzExecutor(address(fixtureV2.receiveUln302), address(fixtureV2.endpointV2));
+        receiveUln302View = new ReceiveUln302View();
+        receiveUln302View.initialize(address(fixtureV2.endpointV2), address(receiveUln302));
+        lzExecutor = new LzExecutor();
+        lzExecutor.initialize(
+            address(fixtureV2.receiveUln302),
+            address(receiveUln302View),
+            address(fixtureV2.endpointV2)
+        );
         EID = fixtureV2.eid;
 
         // wire to self
@@ -64,19 +72,20 @@ contract LzExecutorTest is Test, ILayerZeroReceiver {
         receiveUln302.commitVerification(packetHeader, payloadHash);
 
         // verified
-        assertEq(uint256(receiveUln302.verifiable(packetHeader, payloadHash)), uint256(VerificationState.Verified));
+        assertEq(uint256(receiveUln302View.verifiable(packetHeader, payloadHash)), uint256(VerificationState.Verified));
         // executable
-        assertEq(uint256(endpointV2.executable(origin, receiver)), uint256(ExecutionState.Executable));
+        assertEq(uint256(lzExecutor.executable(origin, receiver)), uint256(ExecutionState.Executable));
 
         // commit and execute
+        NativeDropParam[] memory nativeDrop = new NativeDropParam[](0);
         lzExecutor.commitAndExecute(
             address(receiveUln302),
             LzReceiveParam(origin, receiver, packet.guid, packet.message, "", 100000, 0),
-            NativeDropParam(address(0x0), 0)
+            nativeDrop
         );
 
         // executed
-        assertEq(uint256(endpointV2.executable(origin, receiver)), uint256(ExecutionState.Executed));
+        assertEq(uint256(lzExecutor.executable(origin, receiver)), uint256(ExecutionState.Executed));
     }
 
     function test_CommitAndExecute_NativeDropAndExecute() public {
@@ -88,17 +97,19 @@ contract LzExecutorTest is Test, ILayerZeroReceiver {
         vm.deal(address(this), 1000);
         assertEq(alice.balance, 0); // alice had no funds
         // commit and execute
+        NativeDropParam[] memory nativeDrop = new NativeDropParam[](1);
+        nativeDrop[0] = NativeDropParam(alice, 1000);
         lzExecutor.commitAndExecute{ value: 1000 }(
             address(receiveUln302),
             LzReceiveParam(origin, receiver, packet.guid, packet.message, "", 100000, 0),
-            NativeDropParam(alice, 1000)
+            nativeDrop
         );
         assertEq(address(this).balance, 0);
         assertEq(address(lzExecutor).balance, 0);
         assertEq(alice.balance, 1000); // alice received funds
 
         // executed
-        assertEq(uint256(endpointV2.executable(origin, receiver)), uint256(ExecutionState.Executed));
+        assertEq(uint256(lzExecutor.executable(origin, receiver)), uint256(ExecutionState.Executed));
     }
 
     function test_CommitAndExecute_ExecuteWithValue() public {
@@ -109,16 +120,17 @@ contract LzExecutorTest is Test, ILayerZeroReceiver {
 
         vm.deal(address(this), 1000);
         // commit and execute
+        NativeDropParam[] memory nativeDrop = new NativeDropParam[](0);
         lzExecutor.commitAndExecute{ value: 1000 }(
             address(receiveUln302),
             LzReceiveParam(origin, receiver, packet.guid, packet.message, "", 100000, 1000),
-            NativeDropParam(address(0x0), 0)
+            nativeDrop
         );
         assertEq(address(lzExecutor).balance, 0);
         assertEq(address(this).balance, 1000);
 
         // executed
-        assertEq(uint256(endpointV2.executable(origin, receiver)), uint256(ExecutionState.Executed));
+        assertEq(uint256(lzExecutor.executable(origin, receiver)), uint256(ExecutionState.Executed));
     }
 
     function test_CommitAndExecute_VerifyAndExecute() public {
@@ -127,49 +139,59 @@ contract LzExecutorTest is Test, ILayerZeroReceiver {
         receiveUln302.verify(packetHeader, payloadHash, 1);
 
         // verifiable
-        assertEq(uint256(receiveUln302.verifiable(packetHeader, payloadHash)), uint256(VerificationState.Verifiable));
+        assertEq(
+            uint256(receiveUln302View.verifiable(packetHeader, payloadHash)),
+            uint256(VerificationState.Verifiable)
+        );
         // not executable
-        assertEq(uint256(endpointV2.executable(origin, receiver)), uint256(ExecutionState.NotExecutable));
+        assertEq(uint256(lzExecutor.executable(origin, receiver)), uint256(ExecutionState.NotExecutable));
 
         // commit and execute
+        NativeDropParam[] memory nativeDrop = new NativeDropParam[](0);
         lzExecutor.commitAndExecute(
             address(receiveUln302),
             LzReceiveParam(origin, receiver, packet.guid, packet.message, "", 100000, 0),
-            NativeDropParam(address(0x0), 0)
+            nativeDrop
         );
 
         // verified
-        assertEq(uint256(receiveUln302.verifiable(packetHeader, payloadHash)), uint256(VerificationState.Verified));
+        assertEq(uint256(receiveUln302View.verifiable(packetHeader, payloadHash)), uint256(VerificationState.Verified));
         // executed
-        assertEq(uint256(endpointV2.executable(origin, receiver)), uint256(ExecutionState.Executed));
+        assertEq(uint256(lzExecutor.executable(origin, receiver)), uint256(ExecutionState.Executed));
     }
 
     function test_CommitAndExecute_Revert_Verifying() public {
-        assertEq(uint256(receiveUln302.verifiable(packetHeader, payloadHash)), uint256(VerificationState.Verifying));
+        assertEq(
+            uint256(receiveUln302View.verifiable(packetHeader, payloadHash)),
+            uint256(VerificationState.Verifying)
+        );
 
-        vm.expectRevert(LzExecutor.Verifying.selector);
+        NativeDropParam[] memory nativeDrop = new NativeDropParam[](0);
+        vm.expectRevert(LzExecutor.LzExecutor_Verifying.selector);
         lzExecutor.commitAndExecute(
             address(receiveUln302),
             LzReceiveParam(origin, receiver, packet.guid, packet.message, "", 100000, 0),
-            NativeDropParam(address(0x0), 0)
+            nativeDrop
         );
     }
 
     function test_CommitAndExecute_Revert_Executed() public {
+        NativeDropParam[] memory nativeDrop = new NativeDropParam[](0);
+
         vm.prank(address(fixtureV2.dvn));
         receiveUln302.verify(packetHeader, payloadHash, 1);
         lzExecutor.commitAndExecute(
             address(receiveUln302),
             LzReceiveParam(origin, receiver, packet.guid, packet.message, "", 100000, 0),
-            NativeDropParam(address(0x0), 0)
+            nativeDrop
         );
 
         // try again
-        vm.expectRevert(LzExecutor.Executed.selector);
+        vm.expectRevert(LzExecutor.LzExecutor_Executed.selector);
         lzExecutor.commitAndExecute(
             address(receiveUln302),
             LzReceiveParam(origin, receiver, packet.guid, packet.message, "", 100000, 0),
-            NativeDropParam(address(0x0), 0)
+            nativeDrop
         );
     }
 

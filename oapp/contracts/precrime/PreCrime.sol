@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 
-pragma solidity ^0.8.22;
+pragma solidity ^0.8.20;
 
 import { Ownable } from "@openzeppelin/contracts/access/Ownable.sol";
 import { BytesLib } from "solidity-bytes-utils/contracts/BytesLib.sol";
@@ -32,8 +32,7 @@ abstract contract PreCrime is Ownable, IPreCrime {
         _;
     }
 
-    constructor(address _endpoint, address _simulator, address _owner) {
-        _transferOwnership(_owner);
+    constructor(address _endpoint, address _simulator) {
         lzEndpoint = _endpoint;
         simulator = _simulator;
         oApp = IOAppPreCrimeSimulator(_simulator).oApp();
